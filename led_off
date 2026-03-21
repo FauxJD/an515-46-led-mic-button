@@ -1,0 +1,83 @@
+#!/bin/bash
+
+# ============================================
+# Microphone Mute LED Controller
+# For Acer Nitro AN515-46 (Realtek ALC287)
+# ============================================
+
+# LED Behavior Modes:
+#   "mute"   - LED ON when microphone is MUTED
+#   "active" - LED ON when microphone is ACTIVE  
+#   "off"    - LED always OFF
+#   "on"     - LED always ON
+LED_MODE="mute"
+
+# Hardware configuration
+CODEC_DEVICE="/dev/snd/hwC2D0"
+GPIO_BIT=0x10
+GPIO_MASK=$GPIO_BIT
+
+# Initialize GPIO (required once at startup)
+init_gpio() {
+    sudo hda-verb "$CODEC_DEVICE" 0x01 SET_GPIO_MASK $GPIO_MASK > /dev/null 2>&1
+    sudo hda-verb "$CODEC_DEVICE" 0x01 SET_GPIO_DIRECTION $GPIO_MASK > /dev/null 2>&1
+}
+
+# Turn LED ON
+led_on() {
+    sudo hda-verb "$CODEC_DEVICE" 0x01 SET_GPIO_DATA $GPIO_BIT > /dev/null 2>&1
+}
+
+# Turn LED OFF
+led_off() {
+    sudo hda-verb "$CODEC_DEVICE" 0x01 SET_GPIO_DATA 0x00 > /dev/null 2>&1
+}
+
+# Update LED based on microphone state
+update_led() {
+    # Get current mute status from PulseAudio/PipeWire
+    MUTE_STATUS=$(pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null | awk '{print $2}')
+    
+    case "$LED_MODE" in
+        "mute")
+            if [ "$MUTE_STATUS" = "yes" ]; then
+                led_on
+                echo "[$(date '+%H:%M:%S')] Mic MUTED → LED ON"
+            else
+                led_off
+                echo "[$(date '+%H:%M:%S')] Mic ACTIVE → LED OFF"
+            fi
+            ;;
+        "active")
+            if [ "$MUTE_STATUS" = "yes" ]; then
+                led_off
+                echo "[$(date '+%H:%M:%S')] Mic MUTED → LED OFF"
+            else
+                led_on
+                echo "[$(date '+%H:%M:%S')] Mic ACTIVE → LED ON"
+            fi
+            ;;
+        "off")
+            led_off
+            ;;
+        "on")
+            led_on
+            ;;
+    esac
+}
+
+# Main execution
+echo "========================================="
+echo "Microphone LED Controller for AN515-46"
+echo "Mode: $LED_MODE"
+echo "========================================="
+
+init_gpio
+update_led
+
+# Monitor microphone state changes
+pactl subscribe 2>/dev/null | while read -r event; do
+    if echo "$event" | grep -q "source"; then
+        update_led
+    fi
+done
